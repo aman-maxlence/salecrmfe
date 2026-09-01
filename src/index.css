@@ -66,3 +66,89 @@
     @apply bg-background text-foreground;
   }
 }
+
+.thin-scrollbar {
+  scrollbar-width: thin;
+}
+.thin-scrollbar::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 9999px;
+}
+
+/*
+ * Pure-CSS connector org-chart (Territory -> Department -> Team -> Member).
+ * Standard <ul>/<li> "family tree" technique: each <li> draws its own
+ * left/right half of the horizontal bar to its siblings via ::before/::after,
+ * and ::only-child / :first-child / :last-child trim the bar down to just a
+ * vertical drop where there's nothing to connect to. Works for any branching
+ * factor at any level with no per-node measurement/JS needed.
+ */
+.org-chart {
+  display: table;
+  margin: 0 auto;
+  padding-top: 24px;
+}
+.org-chart ul,
+.org-chart li {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+.org-chart ul {
+  padding-top: 32px;
+  display: flex;
+  justify-content: center;
+}
+.org-chart li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 14px 0 14px;
+}
+.org-chart li::before,
+.org-chart li::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 50%;
+  width: 50%;
+  height: 32px;
+  border-top: 2px solid #38bdf8;
+}
+.org-chart li::after {
+  right: auto;
+  left: 50%;
+  border-left: 2px solid #38bdf8;
+}
+.org-chart li:only-child {
+  padding-top: 0;
+}
+.org-chart li:only-child::before,
+.org-chart li:only-child::after {
+  display: none;
+}
+.org-chart li:first-child::before,
+.org-chart li:last-child::after {
+  border: 0 none;
+}
+.org-chart li:last-child::before {
+  border-right: 2px solid #38bdf8;
+  border-radius: 0 8px 0 0;
+}
+.org-chart li:first-child::after {
+  border-radius: 8px 0 0 0;
+}
+.org-chart ul::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  border-left: 2px solid #38bdf8;
+  width: 0;
+  height: 32px;
+}

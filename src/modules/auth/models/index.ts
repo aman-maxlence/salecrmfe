@@ -10,6 +10,7 @@ export interface IOrganization {
   id: number;
   name: string;
   slug: string;
+  domain?: string | null;
   userRole: string;
 }
 
