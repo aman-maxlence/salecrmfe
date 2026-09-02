@@ -1,14 +1,17 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSelector } from 'react-redux';
-import { Plus } from 'lucide-react';
+import { toast } from 'react-toastify';
+import { Plus, Trash2 } from 'lucide-react';
 import { RootState } from '@/store/store';
 import { Button } from '@/modules/settings/components/ui/Button';
 import { Input } from '@/modules/settings/components/ui/Input';
 import { SelectField } from '@/modules/settings/components/ui/Select';
 import { Badge } from '@/modules/settings/components/ui/Badge';
+import { ConfirmDialog } from '@/modules/settings/components/ConfirmDialog';
 import { usePermissions } from '@/modules/settings/hooks/usePermissions';
-import { useSearchItemsQuery } from '../services/inventoryApi';
+import { getErrorMessage } from '@/modules/settings/models';
+import { useSearchItemsQuery, useDeleteItemMutation } from '../services/inventoryApi';
 import { formatMoney, formatQty, InventoryItem } from '../models';
 import { ItemFormDialog } from '../components/ItemFormDialog';
 
@@ -21,11 +24,24 @@ export default function ItemListPage() {
   const [q, setQ] = useState('');
   const [category, setCategory] = useState(ALL);
   const [group, setGroup] = useState(true);
+  const [pendingDelete, setPendingDelete] = useState<{ id: number; name: string } | null>(null);
 
   const { data, isLoading, isError } = useSearchItemsQuery(
     { orgId: orgId ?? 0, q, category: category === ALL ? undefined : category, groupByCategory: group },
     { skip: !orgId }
   );
+  const [deleteItem, { isLoading: isDeleting }] = useDeleteItemMutation();
+
+  const handleDelete = async () => {
+    if (!pendingDelete || !orgId) return;
+    try {
+      await deleteItem({ orgId, id: pendingDelete.id }).unwrap();
+      toast.success(`"${pendingDelete.name}" archived`);
+      setPendingDelete(null);
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Failed to delete item'));
+    }
+  };
 
   const categoryOptions = useMemo(
     () => [{ value: ALL, label: 'All categories' }, ...(data?.categories ?? []).map((c) => ({ value: c, label: c }))],
@@ -90,6 +106,7 @@ export default function ItemListPage() {
                   <th className="px-4 py-2.5 font-medium">Category</th>
                   <th className="px-4 py-2.5 font-medium">Price</th>
                   <th className="px-4 py-2.5 font-medium">On hand</th>
+                  {canManage ? <th className="px-4 py-2.5 font-medium text-right">Delete</th> : null}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -106,6 +123,18 @@ export default function ItemListPage() {
                     <td className="px-4 py-2.5">
                       <Badge tone={Number(item.on_hand ?? 0) <= 0 ? 'warning' : 'muted'}>{formatQty(item.on_hand)}</Badge>
                     </td>
+                    {canManage ? (
+                      <td className="px-4 py-2.5 text-right">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setPendingDelete({ id: item.id, name: item.name })}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </Button>
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
@@ -117,6 +146,16 @@ export default function ItemListPage() {
       {!isLoading && (data?.items.length ?? 0) === 0 ? (
         <p className="text-sm text-muted-foreground">No items yet.</p>
       ) : null}
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+        title="Delete item?"
+        description={`"${pendingDelete?.name}" will be archived and removed from the catalog. Items already on a deal can't be deleted.`}
+        confirmLabel="Delete"
+        isLoading={isDeleting}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }

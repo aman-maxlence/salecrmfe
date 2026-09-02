@@ -234,6 +234,32 @@ export interface UpdateWorkspaceSettingsBody {
   themePalette?: string;
 }
 
+/*----------------------------------------------------------------------------
+ * Company Details - legal/billing info (contact, tax ID, bank details) used
+ * on invoices. Deliberately separate from WorkspaceSettings (branding).
+ *--------------------------------------------------------------------------*/
+export interface CompanyDetails {
+  orgId: number;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  companyName: string | null;
+  vatId: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  bankName: string | null;
+  bankAddress: string | null;
+  bankRoutingNumber: string | null;
+  bankAccountHolderName: string | null;
+  bankAccountNumber: string | null;
+  iban: string | null;
+  swiftCode: string | null;
+  bic: string | null;
+}
+
+export type UpdateCompanyDetailsBody = Partial<Omit<CompanyDetails, 'orgId'>>;
+
 export interface CreateTeamBody {
   name: string;
   departmentId: number | string;

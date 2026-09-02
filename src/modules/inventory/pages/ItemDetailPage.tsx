@@ -1,17 +1,22 @@
-import { Link, useParams } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useSelector } from 'react-redux';
-import { Pencil } from 'lucide-react';
+import { toast } from 'react-toastify';
+import { Pencil, Trash2 } from 'lucide-react';
 import { RootState } from '@/store/store';
 import { Button } from '@/modules/settings/components/ui/Button';
 import { Badge } from '@/modules/settings/components/ui/Badge';
+import { ConfirmDialog } from '@/modules/settings/components/ConfirmDialog';
 import { usePermissions } from '@/modules/settings/hooks/usePermissions';
-import { useGetItemQuery } from '../services/inventoryApi';
+import { getErrorMessage } from '@/modules/settings/models';
+import { useGetItemQuery, useDeleteItemMutation } from '../services/inventoryApi';
 import { formatMoney, formatQty } from '../models';
 import { ItemFormDialog } from '../components/ItemFormDialog';
 import { StockAdjustmentModal } from '../components/StockAdjustmentModal';
 
 export default function ItemDetailPage() {
   const { itemId } = useParams();
+  const navigate = useNavigate();
   const orgId = useSelector((state: RootState) => state.auth.organization?.id);
   const { hasPermission, isLoading: permsLoading } = usePermissions();
   const canManage = permsLoading ? true : hasPermission('manage_inventory');
@@ -20,6 +25,19 @@ export default function ItemDetailPage() {
     { orgId: orgId ?? 0, id: itemId ?? 0 },
     { skip: !orgId || !itemId }
   );
+  const [deleteItem, { isLoading: isDeleting }] = useDeleteItemMutation();
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+
+  const handleDelete = async () => {
+    if (!orgId || !itemId) return;
+    try {
+      await deleteItem({ orgId, id: itemId }).unwrap();
+      toast.success('Item archived');
+      navigate('/inventory');
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Failed to delete item'));
+    }
+  };
 
   if (!orgId) return <p className="text-sm text-muted-foreground">No organization in context.</p>;
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading item...</p>;
@@ -50,6 +68,12 @@ export default function ItemDetailPage() {
                 </Button>
               }
             />
+          ) : null}
+          {canManage ? (
+            <Button size="sm" variant="outline" onClick={() => setIsDeleteOpen(true)}>
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </Button>
           ) : null}
         </div>
       </div>
@@ -131,6 +155,16 @@ export default function ItemDetailPage() {
           )}
         </ul>
       </section>
+
+      <ConfirmDialog
+        open={isDeleteOpen}
+        onOpenChange={setIsDeleteOpen}
+        title="Delete item?"
+        description={`"${item.name}" will be archived and removed from the catalog. Items already on a deal can't be deleted.`}
+        confirmLabel="Delete"
+        isLoading={isDeleting}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }

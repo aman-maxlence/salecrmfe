@@ -3,10 +3,10 @@
  * runtime to the `--primary` CSS variable (see WorkspaceThemeProvider) -
  * that's what Tailwind's `bg-primary`/`text-primary`/`ring-primary`/
  * `border-primary` utilities read (see tailwind.config.js), so anything
- * already using those tokens (the default Button variant, focus rings, ...)
- * re-themes live. Components using hardcoded `bg-blue-600` etc. instead of
- * the token won't - that's a separate, much larger migration, not part of
- * this feature.
+ * already using those tokens (the default Button variant, focus rings, the
+ * sidebar/header brand elements) re-themes live. Any component still using
+ * a hardcoded color like `bg-blue-600` instead of the token won't - watch
+ * for that in new code.
  */
 export interface ThemePalette {
   key: string;

@@ -36,6 +36,11 @@ export const TEAMS_API_ENDPOINTS = {
 
 export const WORKSPACE_SETTINGS_API_ENDPOINTS = {
   BASE: (orgId: OrgId) => `/org/${orgId}/workspace-settings`,
+  LOGO_PRESIGNED_URL: (orgId: OrgId) => `/org/${orgId}/workspace-settings/logo/presigned-url`,
+};
+
+export const COMPANY_DETAILS_API_ENDPOINTS = {
+  BASE: (orgId: OrgId) => `/org/${orgId}/company-details`,
 };
 
 export const USERS_API_ENDPOINTS = {

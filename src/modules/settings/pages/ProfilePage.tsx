@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
-import { Image as ImageIcon, Save } from 'lucide-react';
+import axios from 'axios';
+import { Save } from 'lucide-react';
 import { RootState } from '@/store/store';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { useGetWorkspaceSettingsQuery, useUpdateWorkspaceSettingsMutation } from '../services/workspaceSettingsApi';
+import { LogoUpload } from '../components/LogoUpload';
+import {
+  useGetWorkspaceSettingsQuery,
+  useUpdateWorkspaceSettingsMutation,
+  useGetLogoPresignedUrlMutation,
+} from '../services/workspaceSettingsApi';
 import { getErrorMessage } from '../models';
 import { FONT_OPTIONS, START_PAGE_OPTIONS, THEME_PALETTES, getThemePalette } from '../constants/themePalettes';
 
@@ -15,8 +21,13 @@ export default function ProfilePage() {
 
   const { data: settings, isLoading } = useGetWorkspaceSettingsQuery(orgId ?? 0, { skip: !orgId });
   const [updateSettings, { isLoading: isSaving }] = useUpdateWorkspaceSettingsMutation();
+  const [getLogoPresignedUrl] = useGetLogoPresignedUrlMutation();
 
-  const [logoUrl, setLogoUrl] = useState('');
+  // undefined = logo untouched this session (don't include it in the PUT body,
+  // so the existing stored value/key is left alone); null = explicitly removed;
+  // string = the new S3 key from a completed upload.
+  const [pendingLogoKey, setPendingLogoKey] = useState<string | null | undefined>(undefined);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [companyName, setCompanyName] = useState('');
   const [location, setLocation] = useState('');
   const [startPage, setStartPage] = useState('dashboard');
@@ -26,7 +37,7 @@ export default function ProfilePage() {
   // Sync form fields once the saved settings arrive.
   useEffect(() => {
     if (!settings) return;
-    setLogoUrl(settings.logo_url ?? '');
+    setPendingLogoKey(undefined);
     setCompanyName(settings.company_name ?? org?.name ?? '');
     setLocation(settings.location ?? '');
     setStartPage(settings.default_start_page);
@@ -36,13 +47,38 @@ export default function ProfilePage() {
 
   const selectedPalette = getThemePalette(paletteKey);
 
+  const handleLogoFileSelected = async (file: File) => {
+    if (!orgId) return;
+    setIsUploadingLogo(true);
+    try {
+      const { uploadUrl, key } = await getLogoPresignedUrl({
+        orgId,
+        filename: file.name,
+        contentType: file.type,
+      }).unwrap();
+
+      await axios.put(uploadUrl, file, { headers: { 'Content-Type': file.type } });
+
+      setPendingLogoKey(key);
+      toast.success('Logo uploaded - click "Save Changes" to apply it');
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Failed to upload logo. Please try again.'));
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  };
+
+  const handleLogoRemove = () => {
+    setPendingLogoKey(null);
+  };
+
   const handleSave = async () => {
     if (!orgId) return;
     try {
       await updateSettings({
         orgId,
         body: {
-          logoUrl: logoUrl.trim() || null,
+          ...(pendingLogoKey !== undefined ? { logoUrl: pendingLogoKey } : {}),
           companyName: companyName.trim() || null,
           location: location.trim() || null,
           defaultStartPage: startPage as 'dashboard' | 'deals' | 'inventory',
@@ -61,7 +97,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="max-w-3xl space-y-6 pb-12">
+    <div className="w-full space-y-6 pb-12">
       <div>
         <h1 className="text-xl font-bold tracking-tight text-foreground">Workspace Profile</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -87,21 +123,12 @@ export default function ProfilePage() {
 
         <div className="flex items-center gap-4">
           <label className="text-xs font-medium text-foreground w-24 flex-shrink-0">Logo</label>
-          <div className="flex items-center gap-3 flex-1">
-            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-muted overflow-hidden">
-              {logoUrl ? (
-                <img src={logoUrl} alt="Workspace logo" className="h-full w-full object-cover" />
-              ) : (
-                <ImageIcon className="h-4 w-4 text-muted-foreground" />
-              )}
-            </div>
-            <Input
-              placeholder="https://... (logo image URL)"
-              value={logoUrl}
-              onChange={(e) => setLogoUrl(e.target.value)}
-              className="flex-1"
-            />
-          </div>
+          <LogoUpload
+            currentLogoUrl={pendingLogoKey === null ? null : (settings?.logo_url ?? null)}
+            onFileSelected={handleLogoFileSelected}
+            onRemove={handleLogoRemove}
+            isUploading={isUploadingLogo}
+          />
         </div>
 
         <div className="flex items-center gap-4">
@@ -194,8 +221,8 @@ export default function ProfilePage() {
       </div>
 
       <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={isSaving} className="bg-blue-600 hover:bg-blue-700 text-white">
-          <Save className="h-4 w-4 mr-2" />
+        <Button onClick={handleSave} disabled={isSaving || isUploadingLogo}>
+          <Save className="h-4 w-4" />
           {isSaving ? 'Saving...' : 'Save Changes'}
         </Button>
       </div>

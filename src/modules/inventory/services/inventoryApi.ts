@@ -152,6 +152,15 @@ export const inventoryApi = createApi({
       ],
     }),
 
+    /** Archives the item (backend soft-deletes: status -> 'inactive') - blocked if it's on any deal line items. */
+    deleteItem: builder.mutation<void, { orgId: number | string; id: number | string }>({
+      query: ({ orgId, id }) => ({ url: INVENTORY_API_ENDPOINTS.ITEM(orgId, id), method: 'DELETE' }),
+      invalidatesTags: (_r, _e, { id }) => [
+        { type: 'InventoryItem', id },
+        { type: 'InventoryItem', id: 'LIST' },
+      ],
+    }),
+
     adjustStock: builder.mutation<StockAdjustment, { orgId: number | string; body: AdjustStockBody }>({
       query: ({ orgId, body }) => ({ url: INVENTORY_API_ENDPOINTS.ADJUST(orgId), method: 'POST', body }),
       transformResponse: (response: ApiSuccessResponse<StockAdjustment>) => response.data,
@@ -179,6 +188,7 @@ export const {
   useGetItemQuery,
   useCreateItemMutation,
   useUpdateItemMutation,
+  useDeleteItemMutation,
   useAdjustStockMutation,
   useGetLowStockAlertsQuery,
 } = inventoryApi;

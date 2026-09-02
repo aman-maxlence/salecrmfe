@@ -11,6 +11,7 @@ import TeamDetailPage from '@/modules/settings/pages/TeamDetailPage';
 import HierarchyPage from '@/modules/settings/pages/HierarchyPage';
 import ProfilePage from '@/modules/settings/pages/ProfilePage';
 import InventorySettingsPage from '@/modules/settings/pages/InventorySettingsPage';
+import CompanyPage from '@/modules/settings/pages/CompanyPage';
 
 import OnboardingWizardPage from '@/modules/onboarding/pages/OnboardingWizardPage';
 import ItemListPage from '@/modules/inventory/pages/ItemListPage';
@@ -38,6 +39,7 @@ export const router = createBrowserRouter([
             children: [
               { index: true, element: <Navigate to="territories" replace /> },
               { path: 'profile', element: <ProfilePage /> },
+              { path: 'company-details', element: <CompanyPage /> },
               { path: 'territories', element: <HierarchyPage /> },
               { path: 'hierarchy', element: <HierarchyPage /> },
               { path: 'roles', element: <RolesPage /> },

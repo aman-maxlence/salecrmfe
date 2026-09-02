@@ -26,10 +26,24 @@ export const workspaceSettingsApi = createApi({
       transformResponse: (response: ApiSuccessResponse<WorkspaceSettings>) => response.data,
       invalidatesTags: ['WorkspaceSettings'],
     }),
+
+    getLogoPresignedUrl: builder.mutation<
+      { uploadUrl: string; key: string; expiresIn: number },
+      { orgId: number | string; filename: string; contentType: string }
+    >({
+      query: ({ orgId, filename, contentType }) => ({
+        url: WORKSPACE_SETTINGS_API_ENDPOINTS.LOGO_PRESIGNED_URL(orgId),
+        method: 'POST',
+        body: { filename, contentType },
+      }),
+      transformResponse: (response: ApiSuccessResponse<{ uploadUrl: string; key: string; expiresIn: number }>) =>
+        response.data,
+    }),
   }),
 });
 
 export const {
   useGetWorkspaceSettingsQuery,
   useUpdateWorkspaceSettingsMutation,
+  useGetLogoPresignedUrlMutation,
 } = workspaceSettingsApi;

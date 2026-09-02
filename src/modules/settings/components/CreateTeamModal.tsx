@@ -240,7 +240,7 @@ export function CreateTeamModal({
                             type="checkbox"
                             checked={checked}
                             onChange={() => toggleMember(u.user_id)}
-                            className="h-4 w-4 rounded border-border text-blue-600 focus:ring-blue-500"
+                            className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
                           />
                           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-700 text-white text-xs font-bold flex-shrink-0">
                             {memberName.substring(0, 2).toUpperCase()}
@@ -273,7 +273,7 @@ export function CreateTeamModal({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isSaving} className="bg-blue-600 hover:bg-blue-700 text-white">
+            <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-primary-foreground">
               {isSaving ? 'Saving...' : isEditing ? 'Save Changes' : 'Create Team'}
             </Button>
           </DialogFooter>

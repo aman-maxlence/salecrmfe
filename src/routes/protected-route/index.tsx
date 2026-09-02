@@ -34,7 +34,14 @@ const ProtectedRoute = () => {
   const location = useLocation();
   const user = useSelector((state: RootState) => state.auth.user);
   const orgId = useSelector((state: RootState) => state.auth.organization?.id);
-  const { data, isLoading, isError, error } = useGetMeQuery(undefined, { skip: !!user });
+  // Always re-checked against userbd, even when a `user` is already persisted
+  // from a previous session in this browser - login happens on a different
+  // origin (the shell app), so a since-changed account there wouldn't
+  // otherwise be noticed here, and the stale persisted identity would keep
+  // showing (wrong name/email/avatar) indefinitely. The effect below still
+  // only overwrites state once this resolves, so an already-persisted user
+  // renders immediately rather than waiting on this round-trip.
+  const { data, isLoading, isError, error } = useGetMeQuery();
 
   useEffect(() => {
     if (data?.status === 'success' && data.data?.user) {

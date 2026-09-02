@@ -35,7 +35,7 @@ import {
   useUpdateUserTeamMutation,
   useUpdateUserManagerMutation,
 } from '../services/usersApi';
-import { getErrorMessage, PortalUser, Territory } from '../models';
+import { getErrorMessage, PortalUser, Team, Territory } from '../models';
 import { usePermissions } from '../hooks/usePermissions';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -43,12 +43,45 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CreateTeamModal } from '../components/CreateTeamModal';
 import { Dialog, DialogContent, DialogFooter } from '../components/ui/Dialog';
 
+/** Each level of the org-chart gets its own color so the tier is obvious at
+ * a glance instead of every box looking identical. Keys/order also drive
+ * the legend rendered above the chart, and the matching hex values below
+ * are reused for the static HTML export. */
+type TreeTier = 'admin' | 'territory' | 'department' | 'team' | 'member';
+
+const TIER_LABELS: Record<TreeTier, string> = {
+  admin: 'Workspace Admin',
+  territory: 'Territory',
+  department: 'Department',
+  team: 'Team',
+  member: 'Member',
+};
+
+const TIER_GRADIENTS: Record<TreeTier, string> = {
+  admin: 'from-[#1e293b] to-[#334155]',
+  territory: 'from-[#2e5d99] to-[#3a70ad]',
+  department: 'from-[#0f766e] to-[#14b8a6]',
+  team: 'from-[#6d28d9] to-[#8b5cf6]',
+  member: 'from-[#047857] to-[#10b981]',
+};
+
+// Same 5 colors as TIER_GRADIENTS above, as plain hex for the CSS export (no Tailwind there).
+const TIER_HEX: Record<TreeTier, [string, string]> = {
+  admin: ['#1e293b', '#334155'],
+  territory: ['#2e5d99', '#3a70ad'],
+  department: ['#0f766e', '#14b8a6'],
+  team: ['#6d28d9', '#8b5cf6'],
+  member: ['#047857', '#10b981'],
+};
+
+const TREE_TIERS: TreeTier[] = ['admin', 'territory', 'department', 'team', 'member'];
+
 /** One box in the Tree View org-chart (see the `.org-chart` CSS in index.css
  * for how sibling boxes get connected) - every tier (Territory, Department,
- * Team, Member) renders the same card, just with different content. */
-function TreeCard({ initials, title, subtitle }: { initials: string; title: string; subtitle: string }) {
+ * Team, Member) renders the same card shape, colored by `tier`. */
+function TreeCard({ tier, initials, title, subtitle }: { tier: TreeTier; initials: string; title: string; subtitle: string }) {
   return (
-    <div className="w-52 p-3 rounded-xl bg-gradient-to-r from-[#2e5d99] to-[#3a70ad] text-white shadow-md flex items-center gap-3 border border-white/15 hover:shadow-lg transition-all hover:scale-[1.02]">
+    <div className={`w-52 p-3 rounded-xl bg-gradient-to-r ${TIER_GRADIENTS[tier]} text-white shadow-md flex items-center gap-3 border border-white/15 hover:shadow-lg transition-all hover:scale-[1.02]`}>
       <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-slate-200 text-slate-800 font-bold text-xs border-2 border-white/40 shadow-xs">
         {initials}
       </div>
@@ -56,6 +89,20 @@ function TreeCard({ initials, title, subtitle }: { initials: string; title: stri
         <h4 className="text-sm font-bold text-white truncate leading-tight">{title}</h4>
         <p className="text-xs text-sky-200 font-normal truncate">{subtitle}</p>
       </div>
+    </div>
+  );
+}
+
+/** Small color-key above the org-chart so the tier colors are self-explanatory. */
+function TreeLegend() {
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 pb-2">
+      {TREE_TIERS.map((tier) => (
+        <div key={tier} className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+          <span className={`h-2.5 w-2.5 rounded-full bg-gradient-to-r ${TIER_GRADIENTS[tier]}`} />
+          {TIER_LABELS[tier]}
+        </div>
+      ))}
     </div>
   );
 }
@@ -81,6 +128,7 @@ function MemberTreeNode({
   return (
     <li>
       <TreeCard
+        tier="member"
         initials={memberName.substring(0, 2).toUpperCase()}
         title={memberName}
         subtitle={member.role?.role_name || 'Member'}
@@ -94,6 +142,154 @@ function MemberTreeNode({
       )}
     </li>
   );
+}
+
+const escapeHtml = (value: string) =>
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** One box in the exported tree - same look as the on-screen TreeCard, colored by tier, as a static HTML string. */
+function treeCardHtml(tier: TreeTier, initials: string, title: string, subtitle: string): string {
+  return `<div class="tree-card tier-${tier}"><div class="tree-avatar">${escapeHtml(initials)}</div><div class="tree-text"><h4>${escapeHtml(title)}</h4><p>${escapeHtml(subtitle)}</p></div></div>`;
+}
+
+/** Walks a team's members the same way MemberTreeNode does (roots first, then their reports), as nested <ul><li> HTML instead of JSX. */
+function memberNodeHtml(member: PortalUser, allMembers: PortalUser[], visited: Set<string>): string {
+  const key = String(member.user_id);
+  const memberName = member.name || member.email?.split('@')[0] || `User #${member.user_id}`;
+  const reports = visited.has(key) ? [] : allMembers.filter((m) => String(m.manager_id) === key);
+  const nextVisited = new Set(visited).add(key);
+  const childrenHtml =
+    reports.length > 0
+      ? `<ul>${reports.map((r) => memberNodeHtml(r, allMembers, nextVisited)).join('')}</ul>`
+      : '';
+  return `<li>${treeCardHtml('member', memberName.substring(0, 2).toUpperCase(), memberName, member.role?.role_name || 'Member')}${childrenHtml}</li>`;
+}
+
+/** Rebuilds the same Territory -> Department -> Team -> Member tree the Tree View renders, as a static HTML document. */
+function buildHierarchyTreeHtml(
+  territories: Territory[],
+  teamsList: Team[],
+  userList: PortalUser[],
+  adminName: string,
+  orgName: string
+): string {
+  const territoriesHtml = territories
+    .map((territory) => {
+      const territoryTeams = teamsList.filter((t) => t.territory_id === territory.id);
+      const departmentGroups = new Map<number, { department?: Team['department']; teams: Team[] }>();
+      territoryTeams.forEach((t) => {
+        const key = t.department_id;
+        if (!departmentGroups.has(key)) {
+          departmentGroups.set(key, { department: t.department, teams: [] });
+        }
+        departmentGroups.get(key)!.teams.push(t);
+      });
+
+      const deptsHtml =
+        departmentGroups.size > 0
+          ? `<ul>${[...departmentGroups.values()]
+              .map((group) => {
+                const deptName = group.department?.name || 'Department';
+                const teamsHtml = group.teams
+                  .map((team) => {
+                    const teamMembers = (team.members ?? [])
+                      .map((tm) => userList.find((u) => String(u.user_id) === String(tm.user_id)))
+                      .filter((u): u is PortalUser => !!u);
+
+                    let membersHtml = '';
+                    if (teamMembers.length > 0) {
+                      const memberIds = new Set(teamMembers.map((m) => String(m.user_id)));
+                      const roots = teamMembers.filter((m) => !m.manager_id || !memberIds.has(String(m.manager_id)));
+                      membersHtml = `<ul>${roots.map((r) => memberNodeHtml(r, teamMembers, new Set())).join('')}</ul>`;
+                    }
+
+                    return `<li>${treeCardHtml(
+                      'team',
+                      team.name.substring(0, 2).toUpperCase(),
+                      team.name,
+                      `${teamMembers.length} member${teamMembers.length === 1 ? '' : 's'}`
+                    )}${membersHtml}</li>`;
+                  })
+                  .join('');
+
+                return `<li>${treeCardHtml(
+                  'department',
+                  deptName.substring(0, 2).toUpperCase(),
+                  deptName,
+                  `${group.teams.length} team${group.teams.length === 1 ? '' : 's'}`
+                )}<ul>${teamsHtml}</ul></li>`;
+              })
+              .join('')}</ul>`
+          : '';
+
+      return `<li>${treeCardHtml(
+        'territory',
+        territory.name.substring(0, 2).toUpperCase(),
+        territory.name,
+        `${departmentGroups.size} department${departmentGroups.size === 1 ? '' : 's'}`
+      )}${deptsHtml}</li>`;
+    })
+    .join('');
+
+  const legendHtml = `<div class="legend">${TREE_TIERS.map(
+    (tier) => `<span class="legend-item"><span class="legend-dot tier-${tier}"></span>${escapeHtml(TIER_LABELS[tier])}</span>`
+  ).join('')}</div>`;
+
+  const rootHtml = `<div class="org-chart"><ul><li>${treeCardHtml(
+    'admin',
+    adminName.substring(0, 2).toUpperCase(),
+    adminName,
+    'Workspace Admin'
+  )}<ul>${territoriesHtml}</ul></li></ul></div>`;
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(orgName)} - Hierarchy Tree</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; background: #f8fafc; margin: 0; padding: 40px 16px; }
+  h1 { text-align: center; font-size: 18px; color: #0f172a; margin: 0 0 32px; }
+  .org-chart { display: table; margin: 0 auto; padding-top: 24px; }
+  .org-chart ul, .org-chart li { list-style: none; margin: 0; padding: 0; position: relative; }
+  .org-chart ul { padding-top: 32px; display: flex; justify-content: center; }
+  .org-chart li { display: flex; flex-direction: column; align-items: center; padding: 32px 14px 0 14px; }
+  .org-chart li::before, .org-chart li::after { content: ''; position: absolute; top: 0; right: 50%; width: 50%; height: 32px; border-top: 2px solid #38bdf8; }
+  .org-chart li::after { right: auto; left: 50%; border-left: 2px solid #38bdf8; }
+  .org-chart li:only-child { padding-top: 0; }
+  .org-chart li:only-child::before, .org-chart li:only-child::after { display: none; }
+  .org-chart li:first-child::before, .org-chart li:last-child::after { border: 0 none; }
+  .org-chart li:last-child::before { border-right: 2px solid #38bdf8; border-radius: 0 8px 0 0; }
+  .org-chart li:first-child::after { border-radius: 8px 0 0 0; }
+  .tree-card { width: 208px; padding: 12px; border-radius: 12px; color: #fff; box-shadow: 0 4px 10px rgba(0,0,0,.15); display: flex; align-items: center; gap: 12px; border: 1px solid rgba(255,255,255,.15); }
+  .tree-avatar { flex-shrink: 0; height: 40px; width: 40px; border-radius: 9999px; background: #e2e8f0; color: #1e293b; font-weight: 700; font-size: 12px; display: flex; align-items: center; justify-content: center; border: 2px solid rgba(255,255,255,.4); }
+  .tree-text { min-width: 0; text-align: left; }
+  .tree-text h4 { margin: 0; font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tree-text p { margin: 2px 0 0; font-size: 11px; color: #bae6fd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  ${TREE_TIERS.map((tier) => `.tier-${tier} { background: linear-gradient(to right, ${TIER_HEX[tier][0]}, ${TIER_HEX[tier][1]}); }`).join('\n  ')}
+  .legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 20px; margin-bottom: 8px; }
+  .legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: #64748b; }
+  .legend-dot { display: inline-block; height: 10px; width: 10px; border-radius: 9999px; }
+</style>
+</head>
+<body>
+<h1>${escapeHtml(orgName)} - Organization Hierarchy</h1>
+${legendHtml}
+${rootHtml}
+</body>
+</html>`;
+}
+
+function downloadHierarchyHtml(html: string) {
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `hierarchy-export-${new Date().toISOString().slice(0, 10)}.html`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 export default function HierarchyPage() {
@@ -405,7 +601,7 @@ export default function HierarchyPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <Briefcase className="h-5 w-5" />
             </div>
             <h1 className="text-xl font-bold tracking-tight text-foreground">
@@ -423,8 +619,8 @@ export default function HierarchyPage() {
             onClick={() => setCurrentView(currentView === 'overview' ? 'structure' : 'overview')}
             className={`h-9 gap-2 font-medium px-4 shadow-sm transition-all ${
               currentView === 'overview'
-                ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                : 'border-blue-200 dark:border-blue-900 bg-blue-50/70 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 hover:bg-blue-100'
+                ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                : 'border-primary/30 bg-primary/10 text-primary hover:bg-primary/15'
             }`}
             variant={currentView === 'overview' ? 'default' : 'outline'}
           >
@@ -436,8 +632,8 @@ export default function HierarchyPage() {
             onClick={() => setCurrentView(currentView === 'assign-users' ? 'structure' : 'assign-users')}
             className={`h-9 gap-2 font-medium px-4 shadow-sm transition-all ${
               currentView === 'assign-users'
-                ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                : 'border-blue-200 dark:border-blue-900 bg-blue-50/70 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 hover:bg-blue-100'
+                ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                : 'border-primary/30 bg-primary/10 text-primary hover:bg-primary/15'
             }`}
             variant={currentView === 'assign-users' ? 'default' : 'outline'}
           >
@@ -480,14 +676,14 @@ export default function HierarchyPage() {
                       setRegionFormManagerId('');
                       setIsRegionModalOpen(true);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-l-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition-colors"
+                    className="inline-flex items-center gap-1.5 rounded-l-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
                   >
                     <Plus className="h-4 w-4" />
                     <span>Add</span>
                   </button>
                   <button
                     onClick={() => setIsAddMenuOpen(!isAddMenuOpen)}
-                    className="inline-flex items-center justify-center rounded-r-lg border-l border-blue-500 bg-blue-600 px-2 py-2 text-white hover:bg-blue-700 transition-colors"
+                    className="inline-flex items-center justify-center rounded-r-lg border-l border-primary-foreground/20 bg-primary px-2 py-2 text-primary-foreground hover:bg-primary/90 transition-colors"
                     title="Choose item to add"
                   >
                     <ChevronDown className="h-4 w-4" />
@@ -502,9 +698,9 @@ export default function HierarchyPage() {
                         setIsAddMenuOpen(false);
                         handleOpenAddDepartment();
                       }}
-                      className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-popover-foreground hover:bg-blue-50 dark:hover:bg-blue-950/50 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                      className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-popover-foreground hover:bg-primary/10 hover:text-primary transition-colors"
                     >
-                      <ListOrdered className="h-4 w-4 text-blue-600" />
+                      <ListOrdered className="h-4 w-4 text-primary" />
                       <span>Add Department</span>
                     </button>
                     <button
@@ -512,9 +708,9 @@ export default function HierarchyPage() {
                         setIsAddMenuOpen(false);
                         setIsTeamModalOpen(true);
                       }}
-                      className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-popover-foreground hover:bg-blue-50 dark:hover:bg-blue-950/50 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                      className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-popover-foreground hover:bg-primary/10 hover:text-primary transition-colors"
                     >
-                      <LayoutGrid className="h-4 w-4 text-blue-600" />
+                      <LayoutGrid className="h-4 w-4 text-primary" />
                       <span>Add Team</span>
                     </button>
                     <button
@@ -524,9 +720,9 @@ export default function HierarchyPage() {
                         setRegionFormManagerId('');
                         setIsRegionModalOpen(true);
                       }}
-                      className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-popover-foreground hover:bg-blue-50 dark:hover:bg-blue-950/50 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                      className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-popover-foreground hover:bg-primary/10 hover:text-primary transition-colors"
                     >
-                      <MapPin className="h-4 w-4 text-blue-600" />
+                      <MapPin className="h-4 w-4 text-primary" />
                       <span>Add Territory / Region</span>
                     </button>
                   </div>
@@ -570,7 +766,7 @@ export default function HierarchyPage() {
                   }}
                   className="gap-1.5 text-xs"
                 >
-                  <Plus className="h-3.5 w-3.5 text-blue-600" />
+                  <Plus className="h-3.5 w-3.5 text-primary" />
                   <span>Create first territory</span>
                 </Button>
               </div>
@@ -586,8 +782,8 @@ export default function HierarchyPage() {
                   <div key={territory.id} className="space-y-3">
                     {/* Territory Row Card (Matching Screenshot 1 & 2) */}
                     <div
-                      className={`group flex items-center justify-between rounded-xl border border-blue-100/90 dark:border-blue-900/50 bg-blue-50/35 dark:bg-blue-950/20 px-4 py-3.5 transition-all hover:bg-blue-50/70 dark:hover:bg-blue-950/35 hover:shadow-sm ${
-                        isTerritoryExpanded ? 'ring-1 ring-blue-200 dark:ring-blue-900' : ''
+                      className={`group flex items-center justify-between rounded-xl border border-primary/15 bg-primary/5 px-4 py-3.5 transition-all hover:bg-primary/10 hover:shadow-sm ${
+                        isTerritoryExpanded ? 'ring-1 ring-primary/20' : ''
                       }`}
                     >
                       {/* Left: Chevron, Icon, Name, Dept */}
@@ -600,13 +796,13 @@ export default function HierarchyPage() {
                           className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors"
                         >
                           {isTerritoryExpanded ? (
-                            <ChevronUp className="h-4 w-4 text-blue-600" />
+                            <ChevronUp className="h-4 w-4 text-primary" />
                           ) : (
                             <ChevronRight className="h-4 w-4" />
                           )}
                         </button>
 
-                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100/80 dark:bg-blue-900/60 text-blue-600 dark:text-blue-400">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
                           <Building2 className="h-4.5 w-4.5" />
                         </div>
 
@@ -882,7 +1078,7 @@ export default function HierarchyPage() {
 
                 <Button
                   onClick={() => toast.success('Exporting users list...')}
-                  className="h-9 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-medium px-4"
+                  className="h-9 gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground font-medium px-4"
                 >
                   <Download className="h-4 w-4" />
                   <span>Export</span>
@@ -922,8 +1118,8 @@ export default function HierarchyPage() {
                   }}
                   className={`h-8 gap-1.5 text-xs font-semibold px-3.5 transition-all ${
                     selectedRowIds.length > 0
-                      ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm ring-2 ring-blue-500/20'
-                      : 'bg-blue-600 hover:bg-blue-700 text-white'
+                      ? 'bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm ring-2 ring-primary/20'
+                      : 'bg-primary hover:bg-primary/90 text-primary-foreground'
                   }`}
                 >
                   <Users className="h-3.5 w-3.5" />
@@ -947,7 +1143,7 @@ export default function HierarchyPage() {
                           type="checkbox"
                           checked={userList.length > 0 && selectedRowIds.length === userList.length}
                           onChange={handleToggleSelectAll}
-                          className="h-4 w-4 rounded border-border text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          className="h-4 w-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
                           title="Select All Users"
                         />
                       </th>
@@ -983,7 +1179,7 @@ export default function HierarchyPage() {
                         <tr
                           key={user.id}
                           className={`transition-colors ${
-                            isSelected ? 'bg-blue-50/60 dark:bg-blue-950/30' : 'hover:bg-accent/40'
+                            isSelected ? 'bg-primary/10' : 'hover:bg-accent/40'
                           }`}
                         >
                           {isSelectMode && (
@@ -992,7 +1188,7 @@ export default function HierarchyPage() {
                                 type="checkbox"
                                 checked={isSelected}
                                 onChange={() => handleToggleSelectRow(user.id)}
-                                className="h-4 w-4 rounded border-border text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                className="h-4 w-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
                               />
                             </td>
                           )}
@@ -1001,12 +1197,12 @@ export default function HierarchyPage() {
                           </td>
                           <td className="px-4 py-3 font-medium text-foreground">
                             <div className="flex items-center gap-2.5">
-                              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-white font-bold text-xs">
+                              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground font-bold text-xs">
                                 {displayName.substring(0, 1).toUpperCase()}
                               </div>
                               <span>{displayName}</span>
                               {user.role?.is_admin && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-600 border border-blue-200">
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/10 text-primary border border-primary/20">
                                   Admin
                                 </span>
                               )}
@@ -1045,7 +1241,7 @@ export default function HierarchyPage() {
                                 setIsMappingEditing(false);
                                 setIsHierarchyMappingModalOpen(true);
                               }}
-                              className="h-7 px-2.5 text-xs font-medium gap-1.5 border-blue-200 bg-blue-50/70 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 hover:bg-blue-100"
+                              className="h-7 px-2.5 text-xs font-medium gap-1.5 border-primary/20 bg-primary/10 text-primary hover:bg-primary/15"
                             >
                               <Edit className="h-3 w-3" />
                               <span>Hierarchy Mapping</span>
@@ -1079,7 +1275,7 @@ export default function HierarchyPage() {
                     onClick={handleSaveUserMapping}
                     disabled={isUpdatingUserTerritory || isUpdatingUserTeam || isUpdatingUserManager}
                     size="sm"
-                    className="h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium px-3"
+                    className="h-7 text-xs bg-primary hover:bg-primary/90 text-primary-foreground font-medium px-3"
                   >
                     {isUpdatingUserTerritory || isUpdatingUserTeam || isUpdatingUserManager ? 'Saving...' : 'Save'}
                   </Button>
@@ -1095,7 +1291,7 @@ export default function HierarchyPage() {
                   onClick={() => setIsMappingEditing(true)}
                   variant="outline"
                   size="sm"
-                  className="h-7 gap-1.5 text-xs border-blue-200 bg-blue-50/60 text-blue-600 hover:bg-blue-100 font-medium"
+                  className="h-7 gap-1.5 text-xs border-primary/20 bg-primary/10 text-primary hover:bg-primary/15 font-medium"
                 >
                   <Edit className="h-3 w-3" />
                   <span>Reassign User</span>
@@ -1280,9 +1476,16 @@ export default function HierarchyPage() {
             <div className="flex items-center gap-3">
               <Button
                 onClick={() => {
-                  toast.success('Exported tree structure successfully');
+                  if (territories.length === 0) {
+                    toast.info('Nothing to export yet — add territories, teams, and members first.');
+                    return;
+                  }
+                  const adminName = workspaceAdmin?.name || workspaceAdmin?.email || org?.name || 'Workspace';
+                  const html = buildHierarchyTreeHtml(territories, teamsList, userList, adminName, org?.name || 'Workspace');
+                  downloadHierarchyHtml(html);
+                  toast.success('Tree structure exported successfully');
                 }}
-                className="h-9 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 shadow-sm"
+                className="h-9 gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold px-4 shadow-sm"
               >
                 <Download className="h-4 w-4" />
                 <span>Export</span>
@@ -1293,7 +1496,7 @@ export default function HierarchyPage() {
           {/* Canvas Viewport */}
           {territories.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border py-16 text-center space-y-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 dark:bg-blue-950 text-blue-600 mx-auto">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary mx-auto">
                 <Layers className="h-6 w-6" />
               </div>
               <h3 className="text-base font-semibold text-foreground">No Territories Yet</h3>
@@ -1302,18 +1505,20 @@ export default function HierarchyPage() {
               </p>
               <Button
                 onClick={() => setCurrentView('structure')}
-                className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white"
+                className="h-8 text-xs bg-primary hover:bg-primary/90 text-primary-foreground"
               >
                 Go to Structure
               </Button>
             </div>
           ) : (
             <div className="overflow-x-auto thin-scrollbar rounded-2xl border border-border/80 bg-slate-50/60 dark:bg-slate-950/60 p-8">
+              <TreeLegend />
               <div className="org-chart">
                 <ul>
                   {/* Root: whoever holds the org's admin role */}
                   <li>
                     <TreeCard
+                      tier="admin"
                       initials={(workspaceAdmin?.name || org?.name || 'WA').substring(0, 2).toUpperCase()}
                       title={workspaceAdmin?.name || workspaceAdmin?.email || org?.name || 'Workspace'}
                       subtitle="Workspace Admin"
@@ -1335,9 +1540,10 @@ export default function HierarchyPage() {
                     return (
                       <li key={territory.id}>
                         <TreeCard
+                          tier="territory"
                           initials={territory.name.substring(0, 2).toUpperCase()}
                           title={territory.name}
-                          subtitle={`${territoryTeams.length} team${territoryTeams.length === 1 ? '' : 's'}`}
+                          subtitle={`${departmentGroups.size} department${departmentGroups.size === 1 ? '' : 's'}`}
                         />
 
                         {deptEntries.length > 0 && (
@@ -1347,6 +1553,7 @@ export default function HierarchyPage() {
                               return (
                                 <li key={deptId}>
                                   <TreeCard
+                                    tier="department"
                                     initials={deptName.substring(0, 2).toUpperCase()}
                                     title={deptName}
                                     subtitle={`${group.teams.length} team${group.teams.length === 1 ? '' : 's'}`}
@@ -1361,6 +1568,7 @@ export default function HierarchyPage() {
                                       return (
                                         <li key={team.id}>
                                           <TreeCard
+                                            tier="team"
                                             initials={team.name.substring(0, 2).toUpperCase()}
                                             title={team.name}
                                             subtitle={`${teamMembers.length} member${teamMembers.length === 1 ? '' : 's'}`}
@@ -1452,7 +1660,7 @@ export default function HierarchyPage() {
               </label>
 
               {deptFormHead ? (
-                <div className="rounded-lg border border-blue-100 bg-blue-50/60 dark:bg-blue-950/30 p-3 flex items-center justify-between">
+                <div className="rounded-lg border border-primary/15 bg-primary/10 p-3 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-700 text-white text-xs font-bold">
                       {deptFormHead.name.substring(0, 2).toUpperCase()}
@@ -1512,7 +1720,7 @@ export default function HierarchyPage() {
               </Button>
               <Button
                 type="submit"
-                className="bg-blue-600 hover:bg-blue-700 text-white"
+                className="bg-primary hover:bg-primary/90 text-primary-foreground"
               >
                 Create Department
               </Button>
@@ -1567,7 +1775,7 @@ export default function HierarchyPage() {
               <Button type="button" variant="outline" onClick={() => setIsRegionModalOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white">
+              <Button type="submit" className="bg-primary hover:bg-primary/90 text-primary-foreground">
                 Create Territory
               </Button>
             </DialogFooter>
@@ -1653,7 +1861,7 @@ export default function HierarchyPage() {
             <Button variant="outline" onClick={() => setIsBulkAssignOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleApplyBulkChanges} className="bg-blue-600 hover:bg-blue-700 text-white">
+            <Button onClick={handleApplyBulkChanges} className="bg-primary hover:bg-primary/90 text-primary-foreground">
               Apply Changes
             </Button>
           </DialogFooter>

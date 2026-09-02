@@ -37,6 +37,7 @@ import { LOGIN_URL } from '@/app/constants';
 import { logout } from '@/modules/auth/auth-slice';
 import { useLogoutUserMutation } from '@/modules/auth/services';
 import { usePermissions } from '@/modules/settings/hooks/usePermissions';
+import { useGetWorkspaceSettingsQuery } from '@/modules/settings/services/workspaceSettingsApi';
 import { PreviewModeToggle } from './PreviewModeToggle';
 
 const workspaceNavItems = [
@@ -66,6 +67,7 @@ const settingsSections = [
     title: 'WORKSPACE SETTINGS',
     items: [
       { to: '/settings/profile', label: 'Profile & Theme', icon: User },
+      { to: '/settings/company-details', label: 'Company Details', icon: Building2 },
       { to: '/settings/territories', label: 'Hierarchy Management', icon: Network },
       { to: '/settings/inventory', label: 'Inventory Settings', icon: Package },
     ],
@@ -81,6 +83,7 @@ const settingsSections = [
 
 const BREADCRUMB_MAP: Record<string, { category: string; title: string }> = {
   '/settings/profile': { category: 'Workspace Settings', title: 'Profile & Theme' },
+  '/settings/company-details': { category: 'Workspace Settings', title: 'Company Details' },
   '/settings/territories': { category: 'Workspace Settings', title: 'Hirearchy planner' },
   '/settings/hierarchy': { category: 'Workspace Settings', title: 'Hirearchy planner' },
   '/settings/inventory': { category: 'Workspace Settings', title: 'Inventory Settings' },
@@ -90,6 +93,7 @@ const BREADCRUMB_MAP: Record<string, { category: string; title: string }> = {
 
 export default function MainLayout() {
   const user = useSelector((state: RootState) => state.auth.user);
+  const org = useSelector((state: RootState) => state.auth.organization);
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const location = useLocation();
@@ -98,6 +102,10 @@ export default function MainLayout() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState(false);
+
+  const { data: workspaceSettings } = useGetWorkspaceSettingsQuery(org?.id ?? 0, { skip: !org?.id });
+  const brandName = workspaceSettings?.company_name || 'Sales CRM';
+  const brandInitials = brandName.slice(0, 2).toUpperCase();
 
   const isSettingsRoute = location.pathname.startsWith('/settings');
 
@@ -124,7 +132,7 @@ export default function MainLayout() {
     };
 
   return (
-    <div className={`flex min-h-screen ${isDarkMode ? 'dark bg-background text-foreground' : 'bg-background text-foreground'}`}>
+    <div className={`flex h-screen overflow-hidden ${isDarkMode ? 'dark bg-background text-foreground' : 'bg-background text-foreground'}`}>
       {/* ---------------------------------------------------- */}
       {/* SIDEBAR (Unified Modern UI)                          */}
       {/* ---------------------------------------------------- */}
@@ -137,12 +145,16 @@ export default function MainLayout() {
         {/* Top SC Avatar & Collapse Button */}
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-border">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white font-bold text-xs shadow-xs">
-              SC
+            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary text-primary-foreground font-bold text-xs shadow-xs">
+              {workspaceSettings?.logo_url ? (
+                <img src={workspaceSettings.logo_url} alt={brandName} className="h-full w-full object-cover" />
+              ) : (
+                brandInitials
+              )}
             </div>
             {isSidebarOpen && (
-              <span className="font-semibold text-foreground text-sm tracking-tight">
-                Sales CRM
+              <span className="font-semibold text-foreground text-sm tracking-tight truncate">
+                {brandName}
               </span>
             )}
           </div>
@@ -204,16 +216,14 @@ export default function MainLayout() {
                             isSidebarOpen ? 'justify-start gap-2.5 px-3 py-2' : 'justify-center p-2'
                           } rounded-lg text-xs font-medium transition-all group relative ${
                             isActive
-                              ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 font-semibold shadow-2xs'
+                              ? 'bg-primary/10 text-primary font-semibold shadow-2xs'
                               : 'text-foreground/80 hover:bg-accent hover:text-foreground'
                           }`}
                           title={isSidebarOpen ? '' : item.label}
                         >
                           <Icon
                             className={`h-4 w-4 flex-shrink-0 transition-colors ${
-                              isActive
-                                ? 'text-blue-600 dark:text-blue-400'
-                                : 'text-muted-foreground group-hover:text-foreground'
+                              isActive ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'
                             }`}
                           />
                           {isSidebarOpen && <span className="truncate">{item.label}</span>}
@@ -246,16 +256,14 @@ export default function MainLayout() {
                     isSidebarOpen ? 'justify-start gap-2.5 px-3 py-2' : 'justify-center p-2'
                   } rounded-lg text-xs font-medium transition-all group relative ${
                     isActive
-                      ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 font-semibold shadow-2xs'
+                      ? 'bg-primary/10 text-primary font-semibold shadow-2xs'
                       : 'text-foreground/80 hover:bg-accent hover:text-foreground'
                   }`}
                   title={isSidebarOpen ? '' : label}
                 >
                   <Icon
                     className={`h-4 w-4 flex-shrink-0 transition-colors ${
-                      isActive
-                        ? 'text-blue-600 dark:text-blue-400'
-                        : 'text-muted-foreground group-hover:text-foreground'
+                      isActive ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'
                     }`}
                   />
                   {isSidebarOpen && <span className="truncate text-sm">{label}</span>}
@@ -323,10 +331,14 @@ export default function MainLayout() {
             {/* User Profile Avatar */}
             <button
               onClick={() => navigate('/settings/profile')}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white font-bold text-xs shadow-xs hover:opacity-90 transition-opacity"
+              className="flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary text-primary-foreground font-bold text-xs shadow-xs hover:opacity-90 transition-opacity"
               title={user?.email ?? 'Profile'}
             >
-              SC
+              {workspaceSettings?.logo_url ? (
+                <img src={workspaceSettings.logo_url} alt={brandName} className="h-full w-full object-cover" />
+              ) : (
+                brandInitials
+              )}
             </button>
 
             <PreviewModeToggle />
@@ -354,7 +366,7 @@ export default function MainLayout() {
                 <span className="font-medium text-foreground">{currentBreadcrumb.category}</span>
               </div>
               <span className="text-muted-foreground/60">/</span>
-              <span className="font-semibold text-blue-600 dark:text-blue-400">
+              <span className="font-semibold text-primary">
                 {currentBreadcrumb.title}
               </span>
             </div>

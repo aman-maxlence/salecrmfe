@@ -8,6 +8,7 @@ import { territoriesApi } from '@/modules/settings/services/territoriesApi';
 import { departmentsApi } from '@/modules/settings/services/departmentsApi';
 import { teamsApi } from '@/modules/settings/services/teamsApi';
 import { workspaceSettingsApi } from '@/modules/settings/services/workspaceSettingsApi';
+import { companyDetailsApi } from '@/modules/settings/services/companyDetailsApi';
 import { usersApi } from '@/modules/settings/services/usersApi';
 import { invitesApi } from '@/modules/settings/services/invitesApi';
 import { inviteLinkApi } from '@/modules/settings/services/inviteLinkApi';
@@ -26,6 +27,7 @@ const persistConfig = {
     departmentsApi.reducerPath,
     teamsApi.reducerPath,
     workspaceSettingsApi.reducerPath,
+    companyDetailsApi.reducerPath,
     usersApi.reducerPath,
     invitesApi.reducerPath,
     inviteLinkApi.reducerPath,
@@ -42,6 +44,7 @@ const rootReducer = combineReducers({
   [departmentsApi.reducerPath]: departmentsApi.reducer,
   [teamsApi.reducerPath]: teamsApi.reducer,
   [workspaceSettingsApi.reducerPath]: workspaceSettingsApi.reducer,
+  [companyDetailsApi.reducerPath]: companyDetailsApi.reducer,
   [usersApi.reducerPath]: usersApi.reducer,
   [invitesApi.reducerPath]: invitesApi.reducer,
   [inviteLinkApi.reducerPath]: inviteLinkApi.reducer,
@@ -63,6 +66,7 @@ export const store = configureStore({
       departmentsApi.middleware,
       teamsApi.middleware,
       workspaceSettingsApi.middleware,
+      companyDetailsApi.middleware,
       usersApi.middleware,
       invitesApi.middleware,
       inviteLinkApi.middleware,
